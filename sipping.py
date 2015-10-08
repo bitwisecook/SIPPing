@@ -68,18 +68,18 @@ def canon_header(s):
 
 
 def parse_headers(f):
-        """Return dict of HTTP headers parsed from a file object."""
-        d = {}
-        while 1:
-            line = f.readline().strip()
-            if not line:
-                break
-            l = line.split(None, 1)
-            if not l[0].endswith(':'):
-                raise SipUnpackError('invalid header: %r' % line)
-            k = l[0][:-1].lower()
-            d[k] = len(l) != 1 and l[1] or ''
-        return d
+    """Return dict of HTTP headers parsed from a file object."""
+    d = {}
+    while 1:
+        line = f.readline().strip()
+        if not line:
+            break
+        l = line.split(None, 1)
+        if not l[0].endswith(':'):
+            raise SipUnpackError('invalid header: %r' % line)
+        k = l[0][:-1].lower()
+        d[k] = len(l) != 1 and l[1] or ''
+    return d
 
 
 def parse_body(f, headers):
@@ -207,51 +207,50 @@ def render_template(template, template_vars):
 
 
 def gen_request(template_vars, options):
+    for i in xrange(options.count):
+        template_vars["seq"] = i
+        for k in template_vars.keys():
+            if k.startswith("."):
+                template_vars[k[1:]] = eval(template_vars[k])
 
-        for i in xrange(options.count):
-            template_vars["seq"] = i
-            for k in template_vars.keys():
-                if k.startswith("."):
-                    template_vars[k[1:]] = eval(template_vars[k])
+        if options.request_template is None:
+            request = render_template(def_request, template_vars)
+        else:
+            try:
+                f = open(options.request_template)
+                file_request = f.read()
+                f.close()
+                request = render_template(file_request, template_vars)
+            except Exception, e:
+                sys.stderr.write("ERROR: cannot open file %s. %s\n" % (options.request_template, e))
+                sys.exit(-1)
+    try:
+        req = Request(request)
+    except SipUnpackError, e:
+        sys.stderr.write("ERROR: malformed SIP Request. %s\n" % e)
+        sys.exit(-1)
 
-            if options.request_template is None:
-                request = render_template(def_request, template_vars)
-            else:
-                try:
-                    f = open(options.request_template)
-                    file_request = f.read()
-                    f.close()
-                    request = render_template(file_request, template_vars)
-                except Exception, e:
-                    sys.stderr.write("ERROR: cannot open file %s. %s\n" % (options.request_template, e))
-                    sys.exit(-1)
-        try:
-            req = Request(request)
-        except SipUnpackError, e:
-            sys.stderr.write("ERROR: malformed SIP Request. %s\n" % e)
-            sys.exit(-1)
-
-        if "cseq" not in req.headers:
-            req.headers["cseq"] = "%d %s" % (i, req.method)
-        yield str(req)
+    if "cseq" not in req.headers:
+        req.headers["cseq"] = "%d %s" % (i, req.method)
+    yield str(req)
 
 
 def open_sock(options):
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
-            sock.setblocking(0)
-        except Exception, e:
-            sys.stderr.write("ERROR: cannot create socket. %s\n" % e)
-            sys.exit(-1)
-        try:
-            sock.seckopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.seckopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        except AttributeError:
-            pass
-        if options.source_port:
-            sock.bind((options.source_ip, options.source_port))
-        sock.settimeout(options.wait)
-        return sock
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, socket.IPPROTO_UDP)
+        sock.setblocking(0)
+    except Exception, e:
+        sys.stderr.write("ERROR: cannot create socket. %s\n" % e)
+        sys.exit(-1)
+    try:
+        sock.seckopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.seckopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+    except AttributeError:
+        pass
+    if options.source_port:
+        sock.bind((options.source_ip, options.source_port))
+    sock.settimeout(options.wait)
+    return sock
 
 
 def print_reply(buf, template_vars=None, out_regex=None, out_replace=None, err=None, verbose=False, quiet=False):
@@ -308,127 +307,130 @@ def print_reply(buf, template_vars=None, out_regex=None, out_replace=None, err=N
 
 
 def main():
-        usage = """%prog [OPTIONS]"""
-        opt = optparse.OptionParser(usage=usage)
-        opt.add_option('-c', dest='count', type='int', default=sys.maxint,
-           help='Total number of queries to send')
-        opt.add_option('-i', dest='wait', type='float', default=1,
-           help='Specify packet send interval time in seconds')
-        opt.add_option('-T', dest='timeout', type='float', default=1,
-           help='Specify receiving timeout in seconds')
-        opt.add_option('-v', dest='var', type='string', default=[""], action='append',
-           help='add a template variable in format varname:value')
-        opt.add_option('-V', dest='verbose', default=False, action='store_true',
-           help='be verbose dumping full requests / responses')
-        opt.add_option('-q', dest='quiet', default=False, action='store_true',
-           help='be quiet and never print any report')
-        opt.add_option('-a', dest='aggressive', default=False, action='store_true',
-           help='aggressive mode: ignore any response')
-        opt.add_option('-S', dest='source_ip', type='string', default="0.0.0.0",
-           help='Specify ip address to bind for sending and receiving UDP datagrams')
-        opt.add_option('-P', dest='source_port', type='int', default=5060,
-           help='Specify the port number to use as a source port in UDP datagrams')
-        opt.add_option('-d', dest='dest_ip', type='string', default=None,
-           help='*mandatory* Specify the destination ip address')
-        opt.add_option('-p', dest='dest_port', type='int', default=5060,
-           help='*mandatory* Specify the destination port number')
-        opt.add_option('-r', dest='request_template', type='string', default=None,
-           help='Specify the request template file')
-        opt.add_option('-t', dest='print_template', action="store_true", default=False,
-            help='print the default request template')
-        opt.add_option('-m', dest='modules', type='string', default=[], action='append',
-           help='load additionals Python modules used in Python interpreted template variables')
-        opt.add_option('-O', dest='out_regex', type='string', default="",
-           help='regex to apply to response received, (default \'(.*\n)*\')')
-        opt.add_option('-R', dest='out_replace', type='string', default="",
-            help='print this replace string applied to the response')
+    usage = """%prog [OPTIONS]"""
+    opt = optparse.OptionParser(usage=usage)
+    opt.add_option('-c', dest='count', type='int', default=sys.maxint,
+       help='Total number of queries to send')
+    opt.add_option('-i', dest='wait', type='float', default=1,
+       help='Specify packet send interval time in seconds')
+    opt.add_option('-T', dest='timeout', type='float', default=1,
+       help='Specify receiving timeout in seconds')
+    opt.add_option('-v', dest='var', type='string', default=[""], action='append',
+       help='add a template variable in format varname:value')
+    opt.add_option('-V', dest='verbose', default=False, action='store_true',
+       help='be verbose dumping full requests / responses')
+    opt.add_option('-q', dest='quiet', default=False, action='store_true',
+       help='be quiet and never print any report')
+    opt.add_option('-a', dest='aggressive', default=False, action='store_true',
+       help='aggressive mode: ignore any response')
+    opt.add_option('-S', dest='source_ip', type='string', default="0.0.0.0",
+       help='Specify IP address to bind for sending and receiving UDP datagrams')
+    opt.add_option('-P', dest='source_port', type='int', default=5060,
+       help='Specify the port number to use as a source port in UDP datagrams')
+    opt.add_option('-d', dest='dest_ip', type='string', default=None,
+       help='*mandatory* Specify the destination IP address')
+    opt.add_option('-p', dest='dest_port', type='int', default=5060,
+       help='*mandatory* Specify the destination port number')
+    opt.add_option('-r', dest='request_template', type='string', default=None,
+       help='Specify the request template file')
+    opt.add_option('-t', dest='print_template', action="store_true", default=False,
+        help='print the default request template')
+    opt.add_option('-m', dest='modules', type='string', default=[], action='append',
+       help='load additionals Python modules used in Python interpreted template variables')
+    opt.add_option('-O', dest='out_regex', type='string', default="",
+       help='regex to apply to response received, (default \'(.*\n)*\')')
+    opt.add_option('-R', dest='out_replace', type='string', default="",
+        help='print this replace string applied to the response')
 
-        options, args = opt.parse_args(sys.argv[1:])
-        if options.print_template:
-            sys.stderr.write("%s\n" % def_request)
+    options, args = opt.parse_args(sys.argv[1:])
+    if options.print_template:
+        sys.stderr.write("%s\n" % def_request)
+        sys.exit()
+
+    for m in options.modules:
+        globals()[m] = __import__(m)
+
+    if not options.dest_ip:
+        sys.stderr.write("ERROR: destination ip not defined\n")
+        opt.print_help()
+        sys.exit(-1)
+
+    try:
+        sock = open_sock(options)
+    except Exception, e:
+        sys.stderr.write("ERROR: cannot open socket. %s\n" % e)
+        sys.exit(-1)
+
+    if options.source_port == 0:
+        options.source_port = sock.getsockname()[1]
+
+    template_vars = {
+        "source_ip": options.source_ip,
+        "source_port": options.source_port,
+        "dest_ip": options.dest_ip,
+        "dest_port": options.dest_port
+    }
+
+    # first var is empty by default
+    for v in options.var[1:]:
+        try:
+            key = v.split(":")[0]
+            val = ":".join(v.split(":")[1:])
+            template_vars.update({key: val})
+        except IndexError:
+            sys.stderr.write("ERROR: variables must be in format name:value. %s\n" % v)
+            opt.print_help()
             sys.exit()
 
-        for m in options.modules:
-            globals()[m] = __import__(m)
+    if options.verbose:
+        sys.stderr.write("=======================================\n")
+        sys.stderr.write("I'm using these variables in templates: \n")
+        sys.stderr.write("=======================================\n")
+        for k in template_vars:
+            sys.stderr.write("%s: %s\n" % (k, template_vars[k]))
+        sys.stderr.write("=======================================\n\n")
 
-        if not options.dest_ip:
-            sys.stderr.write("ERROR: destination ip not defined\n")
-            opt.print_help()
-            sys.exit(-1)
+    sent = rcvd = 0
 
-        template_vars = {
-            "source_ip": options.source_ip,
-            "source_port": options.source_port,
-            "dest_ip": options.dest_ip,
-            "dest_port": options.dest_port
-        }
-
-        # first var is empty by default
-        for v in options.var[1:]:
+    try:
+        for req in gen_request(template_vars, options):
             try:
-                key = v.split(":")[0]
-                val = ":".join(v.split(":")[1:])
-                template_vars.update({key: val})
-            except IndexError:
-                sys.stderr.write("ERROR: variables must be in format name:value. %s\n" % v)
-                opt.print_help()
-                sys.exit()
+                sip_req = Request(req)
+                # Add Content-Lenght if missing
+                if "content-length" not in sip_req.headers:
+                    sip_req.headers["content-length"] = len(sip_req.body)
 
-        if options.verbose:
-            sys.stderr.write("=======================================\n")
-            sys.stderr.write("I'm using these variables in templates: \n")
-            sys.stderr.write("=======================================\n")
-            for k in template_vars:
-                sys.stderr.write("%s: %s\n" % (k, template_vars[k]))
-            sys.stderr.write("=======================================\n\n")
-
-        try:
-            sock = open_sock(options)
-        except Exception, e:
-            sys.stderr.write("ERROR: cannot open socket. %s\n" % e)
-            sys.exit(-1)
-
-        sent = rcvd = 0
-
-        try:
-            for req in gen_request(template_vars, options):
                 try:
-                    sip_req = Request(req)
-                    # Add Content-Lenght if missing
-                    if "content-length" not in sip_req.headers:
-                        sip_req.headers["content-length"] = len(sip_req.body)
+                    sock.sendto(str(sip_req), (options.dest_ip, options.dest_port))
+                except Exception, e:
+                    sys.stderr.write("ERROR: cannot send packet to %s:%d. %s\n" % (options.dest_ip, options.dest_port, e))
+                if not options.quiet:
+                    sys.stderr.write("sent Request %s to %s:%d cseq=%s len=%d\n" % (sip_req.method, options.dest_ip, options.dest_port, sip_req.headers['cseq'].split()[0], len(str(sip_req))))
+                    if options.verbose:
+                        sys.stderr.write("\n=== Full Request sent ===\n\n")
+                        sys.stderr.write("%s\n" % sip_req)
+                sent += 1
 
-                    try:
-                        sock.sendto(str(sip_req), (options.dest_ip, options.dest_port))
-                    except Exception, e:
-                        sys.stderr.write("ERROR: cannot send packet to %s:%d. %s\n" % (options.dest_ip, options.dest_port, e))
-                    if not options.quiet:
-                        sys.stderr.write("sent Request %s to %s:%d cseq=%s len=%d\n" % (sip_req.method, options.dest_ip, options.dest_port, sip_req.headers['cseq'].split()[0], len(str(sip_req))))
-                        if options.verbose:
-                            sys.stderr.write("\n=== Full Request sent ===\n\n")
-                            sys.stderr.write("%s\n" % sip_req)
-                    sent += 1
+                if not options.aggressive:
+                    read = [sock]
+                    inputready, outputready, exceptready = select.select(read, [], [], options.timeout)
+                    for s in inputready:
+                        if s == sock:
+                            buf = None
+                            buf = sock.recvfrom(0xffff)
+                            print_reply(buf, template_vars, options.out_regex, options.out_replace, verbose=options.verbose, quiet=options.quiet)
+                            rcvd += 1
 
-                    if not options.aggressive:
-                        read = [sock]
-                        inputready, outputready, exceptready = select.select(read, [], [], options.timeout)
-                        for s in inputready:
-                            if s == sock:
-                                buf = None
-                                buf = sock.recvfrom(0xffff)
-                                print_reply(buf, template_vars, options.out_regex, options.out_replace, verbose=options.verbose, quiet=options.quiet)
-                                rcvd += 1
+            except socket.timeout:
+                pass
+            time.sleep(options.wait)
+    except KeyboardInterrupt:
+        pass
 
-                except socket.timeout:
-                    pass
-                time.sleep(options.wait)
-        except KeyboardInterrupt:
-            pass
-
-        if not options.quiet:
-            sys.stderr.write('\n--- statistics ---\n')
-            sys.stderr.write('%d packets transmitted, %d packets received, %.1f%% packet loss\n' % (sent, rcvd, (float(sent - rcvd) / sent) * 100))
+    if not options.quiet:
+        sys.stderr.write('\n--- statistics ---\n')
+        sys.stderr.write('%d packets transmitted, %d packets received, %.1f%% packet loss\n' % (sent, rcvd, (float(sent - rcvd) / sent) * 100))
 
 
 if __name__ == '__main__':
-        main()
+    main()
